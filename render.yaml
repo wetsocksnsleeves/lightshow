@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: lightshow
+    runtime: docker
+    plan: free
+    region: singapore
+    # Free plan has no persistent disk: saved rooms and shows reset on every
+    # restart or redeploy. Sessions live in memory, so keep one instance.
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "8080"
+      # Set to https://lightshow.party once the domain points at Render.
+      - key: PUBLIC_URL
+        value: https://lightshow.onrender.com
+      - key: ALLOWED_HOSTS
+        value: lightshow.party
