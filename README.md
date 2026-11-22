@@ -1,4 +1,4 @@
-# Lightshow
+# lightshow
 
 Turn an audience's phones into a synchronised crowd light show. No app install or hardware wristbands required.
 
@@ -6,7 +6,7 @@ A host draws the venue, drops in an audio track and paints light effects onto a 
 
 [Visit lightshow.party](https://lightshow.party)
 
-[![Lightshow host room showing the effects library, 120 ready seats and a multi-track timeline](docs/media/editor.png)](docs/media/editor.png)
+[![lightshow host room showing the effects library, 120 ready seats and a multi-track timeline](docs/media/editor.png)](docs/media/editor.png)
 
 Built for the **2026 Tanda Hackathon**.
 
@@ -18,16 +18,34 @@ Built for the **2026 Tanda Hackathon**.
 | Lliam · [@lliamsymonds04](https://github.com/lliamsymonds04)     | 3D crowd viewer and Fly.io deployment                                       |
 | Farzad · [@FarzadHayat](https://github.com/FarzadHayat)          | Pitch deck stage lighting and demo show                                     |
 
-## How it works
+## Big screen QR code and camera seat finding
 
-1. **Design the show** in the host room — layer flashes, waves, splits, chases and custom shapes over an audio waveform, or auto-generate a show from three-band frequency analysis.
-2. **Project the big screen** (`/sessions/<code>/screen`) with its corner positioning anchors, LED grille and join QR code.
-3. **Locate seats with the camera** — each phone scans the QR code, points at the big screen to solve its position in the room, syncs its clock to the server, and receives its own light schedule.
-4. **Preview and run live** — simulate a crowd in 3D at `/mock` before showtime, then start playback in sync with the venue's audio.
+Every audience phone needs to know where it is in the room without typing a row or seat number. The big screen (`/sessions/<code>/screen`) handles both joining and positioning in one view:
 
-[![Big screen positioning target with corner anchors, LED grille and join QR code](docs/media/big-screen.png)](docs/media/big-screen.png)
+- **Join QR code** in the centre opens the participant page straight in the phone's browser.
+- **Four corner anchors** (rounded finder squares) let the phone's camera lock onto the screen from anywhere in the room.
+- **Rotation-unique LED grille** (~300 lit and unlit dots) identifies each corner regardless of phone orientation and gives hundreds of matched points to solve the camera's 3D position in metres.
 
-## Demo
+After scanning the QR code, a participant taps **Find my seat**, points their phone back at the big screen for a second until the green lock completes, checks their spot on the room map, and taps **Ready**. The phone then enters fullscreen, requests a wake lock, runs a clock-sync handshake over WebSockets, and downloads its own pre-computed light schedule.
+
+<table>
+  <tr>
+    <td width="72%"><a href="docs/media/big-screen.png"><img src="docs/media/big-screen.png" alt="Big screen positioning target with four corner anchors, LED grille and join QR code" /></a></td>
+    <td width="28%"><a href="docs/demo/phone-setup.gif"><img src="docs/demo/phone-setup.gif" alt="Mobile phone setup demo using a virtual camera pointed at the big screen target" /></a></td>
+  </tr>
+</table>
+
+Point at the big screen → seat solved in metres → synced and ready.
+
+<p>
+  <a href="docs/media/phone-scan.png"><img src="docs/media/phone-scan.png" width="220" alt="Phone camera locking onto the four corner anchors and QR target on the big screen" /></a>
+  <a href="docs/media/phone-found.png"><img src="docs/media/phone-found.png" width="220" alt="Seat found on the room map, 3.4 m from the screen and 1.2 m left of centre" /></a>
+  <a href="docs/media/phone-ready.png"><img src="docs/media/phone-ready.png" width="220" alt="Phone in green standby screen ready for playback" /></a>
+</p>
+
+## Studio and 3D preview
+
+Layer flashes, waves, splits, chases and custom shapes over an audio waveform, or auto-generate a show from three-band frequency analysis. Before showtime, open `/mock` to simulate a crowd joining and watch the whole venue play back in 3D.
 
 | Editor and multi-track timeline                                        | Simulated phones joining a room                                                                     |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
