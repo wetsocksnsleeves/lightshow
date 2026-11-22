@@ -94,11 +94,18 @@ describe("custom server", () => {
       body: form,
     });
     expect(res.status).toBe(201);
+    const cookie = res.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie).toContain("lightshow_owner=");
     const { url } = (await res.json()) as { url: string };
     const stored = await fetch(`${server.httpUrl}${url}`, {
-      headers: { range: "bytes=0-0" },
+      headers: { range: "bytes=0-0", cookie },
     });
     expect(stored.headers.get("content-range")).toBe(`bytes 0-0/${size}`);
+    // Without the uploader's cookie, another visitor cannot fetch the upload.
+    const other = await fetch(`${server.httpUrl}${url}`, {
+      headers: { range: "bytes=0-0" },
+    });
+    expect(other.status).toBe(404);
   }, 60_000);
 
   it("rejects upgrades on unknown paths and closes the socket", async () => {

@@ -142,7 +142,7 @@ export function ShowPicker({
                 )}
               </div>
             ))}
-            <hr />
+            {shows?.length ? <hr /> : null}
             {BUILTIN_SHOWS.map(({ show }) => (
               <button
                 key={show.id}

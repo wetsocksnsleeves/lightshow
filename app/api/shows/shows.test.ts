@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Show } from "@/lib/types";
-import type { ShowSummary } from "@/server/db";
+import { createShow as createDbShow, type ShowSummary } from "@/server/db";
 import { MAX_JSON_BYTES } from "@/server/http";
+import { mintOwnerToken, OWNER_COOKIE } from "@/server/owner";
 import {
   MAX_CLIPS,
   MAX_POLYGON_POINTS,
@@ -13,14 +14,25 @@ import * as collection from "./route";
 
 withTempDataDir();
 
+const ALICE_COOKIE = `${OWNER_COOKIE}=${mintOwnerToken()}`;
+
 function ctx(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-function jsonRequest(method: string, body?: unknown, raw?: string): Request {
+function jsonRequest(
+  method: string,
+  body?: unknown,
+  raw?: string,
+  cookie: string | null = ALICE_COOKIE,
+): Request {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (cookie) headers.cookie = cookie;
   return new Request("http://localhost/api/shows", {
     method,
-    headers: { "content-type": "application/json" },
+    headers,
     body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
   });
 }
@@ -227,7 +239,7 @@ describe("/api/shows", () => {
     const bad = await item.PUT(
       new Request("http://localhost", {
         method: "PUT",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: ALICE_COOKIE },
         body: "{not json",
       }),
       ctx(created.id),
@@ -352,7 +364,11 @@ describe("/api/shows", () => {
       const res = await item.PUT(
         new Request("http://localhost/api/shows/x", {
           method: "PUT",
-          headers: { "content-type": "application/json", ...extra },
+          headers: {
+            "content-type": "application/json",
+            cookie: ALICE_COOKIE,
+            ...extra,
+          },
           body: JSON.stringify({ name: "ok" }),
         }),
         ctx(created.id),
@@ -505,5 +521,81 @@ describe("/api/shows", () => {
         else process.env[key] = value;
       }
     }
+  });
+
+  it("isolates saved shows per browser and hides legacy unowned shows", async () => {
+    const carolCookie = `${OWNER_COOKIE}=${mintOwnerToken()}`;
+    const bobCookie = `${OWNER_COOKIE}=${mintOwnerToken()}`;
+
+    // Legacy show with no owner (e.g. created before owner cookies existed).
+    const legacy = createDbShow({ name: "Legacy show" }, null);
+
+    const carolRes = await collection.POST(
+      jsonRequest(
+        "POST",
+        { name: "Carol private show" },
+        undefined,
+        carolCookie,
+      ),
+    );
+    expect(carolRes.status).toBe(201);
+    const carolShow = ((await carolRes.json()) as { show: Show }).show;
+
+    const bobRes = await collection.POST(
+      jsonRequest("POST", { name: "Bob private show" }, undefined, bobCookie),
+    );
+    expect(bobRes.status).toBe(201);
+    const bobShow = ((await bobRes.json()) as { show: Show }).show;
+
+    // Each browser sees only its own shows.
+    const carolList = (await collection
+      .GET(jsonRequest("GET", undefined, undefined, carolCookie))
+      .json()) as { shows: ShowSummary[] };
+    expect(carolList.shows.map((s) => s.id)).toEqual([carolShow.id]);
+
+    const bobList = (await collection
+      .GET(jsonRequest("GET", undefined, undefined, bobCookie))
+      .json()) as { shows: ShowSummary[] };
+    expect(bobList.shows.map((s) => s.id)).toEqual([bobShow.id]);
+
+    // A fresh browser sees no saved shows and gets a fresh HttpOnly cookie.
+    const freshRes = collection.GET(new Request("http://localhost/api/shows"));
+    expect(freshRes.headers.get("set-cookie")).toContain(`${OWNER_COOKIE}=`);
+    const freshList = (await freshRes.json()) as { shows: ShowSummary[] };
+    expect(freshList.shows).toEqual([]);
+
+    // Bob cannot read, update or delete Carol's show (or legacy shows).
+    expect(
+      (
+        await item.GET(
+          jsonRequest("GET", undefined, undefined, bobCookie),
+          ctx(carolShow.id),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await item.PUT(
+          jsonRequest("PUT", { name: "Stolen" }, undefined, bobCookie),
+          ctx(carolShow.id),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await item.DELETE(
+          jsonRequest("DELETE", undefined, undefined, bobCookie),
+          ctx(carolShow.id),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await item.GET(
+          jsonRequest("GET", undefined, undefined, carolCookie),
+          ctx(legacy.id),
+        )
+      ).status,
+    ).toBe(404);
   });
 });

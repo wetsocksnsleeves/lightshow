@@ -16,6 +16,7 @@ import { getShow } from "./db";
 import { compileInWorker } from "./compile-pool";
 import { LOOPBACK_HOSTNAMES } from "./http";
 import { lanAddresses } from "./lan";
+import { readOwnerIdFromCookieHeader } from "./owner";
 import type { Point, PositioningConfig, Show } from "@/lib/types";
 import {
   SessionError,
@@ -65,6 +66,7 @@ export type ScheduleComputer = (
 
 export type ShowResolver = (
   showId: string,
+  ownerId: string | null,
 ) => Show | undefined | Promise<Show | undefined>;
 
 /**
@@ -83,12 +85,14 @@ export const testWaveComputeSchedule: ScheduleComputer = (show, seat) => ({
 });
 
 /**
- * A built-in show (`lib/builtin-shows.ts`, e.g. the test show), else the
- * saved show from SQLite. The session keeps a snapshot taken here (SPEC 8),
- * so later edits do not reach a running session.
+ * A built-in show (`lib/builtin-shows.ts`, open to everyone), else a saved
+ * show from SQLite owned by `ownerId`. The session keeps a snapshot taken here
+ * (SPEC 8), so later edits do not reach a running session.
  */
-export const defaultResolveShow: ShowResolver = (showId) =>
-  builtinShow(showId) ?? getShow(showId) ?? undefined;
+export const defaultResolveShow: ShowResolver = (showId, ownerId) =>
+  builtinShow(showId) ??
+  (ownerId ? getShow(showId, ownerId) : null) ??
+  undefined;
 
 /** A stored room: enough to bring a session back with the same code. */
 export type RoomRecord = {
@@ -96,6 +100,7 @@ export type RoomRecord = {
   hostToken: string;
   showId: string;
   positioning: PositioningConfig;
+  ownerId?: string | null;
 };
 
 export type RoomStore = {
@@ -225,6 +230,8 @@ export type Connection = {
   ws: WebSocket;
   /** Origin the client connected through, for join URLs without PUBLIC_URL. */
   origin: string;
+  /** Hashed `lightshow_owner` cookie from the upgrade request, if present. */
+  ownerId: string | null;
   role: Role;
   alive: boolean;
 };
@@ -309,6 +316,7 @@ export class WsRouter {
     const conn: Connection = {
       ws,
       origin: originOf(req),
+      ownerId: readOwnerIdFromCookieHeader(req.headers.cookie),
       role: { kind: "none" },
       alive: true,
     };
@@ -615,7 +623,7 @@ export class WsRouter {
     let session: Session;
     let created = false;
     if ("showId" in msg) {
-      const show = await this.resolveShow(msg.showId);
+      const show = await this.resolveShow(msg.showId, conn.ownerId);
       if (!show) {
         throw new SessionError("unknown-show", `no show "${msg.showId}"`);
       }
@@ -627,7 +635,7 @@ export class WsRouter {
       );
       created = true;
       this.startCrowd(session);
-      this.saveRoom(session);
+      this.saveRoom(session, conn.ownerId);
     } else {
       session = await this.sessionFor(msg.code);
       // The join code is public (QR code), so re-attaching needs the token.
@@ -707,12 +715,12 @@ export class WsRouter {
     if (session.T0 !== null) {
       throw new SessionError("show-running", "stop the show before loading");
     }
-    const show = await this.resolveShow(msg.showId);
+    const show = await this.resolveShow(msg.showId, conn.ownerId);
     if (!show) {
       throw new SessionError("unknown-show", `no show "${msg.showId}"`);
     }
     const stale = this.store.setShow(session, show);
-    this.saveRoom(session);
+    this.saveRoom(session, conn.ownerId);
     for (const host of this.hosts.get(session.code) ?? []) {
       this.send(host, this.sessionMessage(host, session, false));
     }
@@ -757,8 +765,8 @@ export class WsRouter {
     const room = this.options.rooms?.load(code.toUpperCase());
     if (!room) return this.store.requireSession(code);
     const show =
-      (await this.resolveShow(room.showId)) ??
-      (await this.resolveShow(TEST_SHOW_ID));
+      (await this.resolveShow(room.showId, room.ownerId ?? null)) ??
+      (await this.resolveShow(TEST_SHOW_ID, null));
     if (!show) return this.store.requireSession(code);
     // Another request may have restored it while the show resolved.
     const again = this.store.getSession(code);
@@ -780,13 +788,14 @@ export class WsRouter {
     if (this.options.fitCrowd) this.store.refitCrowd(session);
   }
 
-  private saveRoom(session: Session): void {
+  private saveRoom(session: Session, ownerId?: string | null): void {
     try {
       this.options.rooms?.save({
         code: session.code,
         hostToken: session.hostToken,
         showId: session.showId,
         positioning: session.positioning,
+        ...(ownerId ? { ownerId } : {}),
       });
     } catch (err) {
       console.error("ws: could not save the room", err);
