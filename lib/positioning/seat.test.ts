@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_POSITIONING,
   inchesFromTargetWidth,
   TARGET_SHARE_OF_SCREEN,
   screenFromConfig,
+  screenFromDiagonal,
   targetShareOfScreen,
   targetWidthFromScreen,
   roomToVenuePoint,
@@ -29,6 +31,13 @@ describe("roomToVenuePoint", () => {
 });
 
 describe("screen size in inches", () => {
+  it("defaults to a 55 inch screen", () => {
+    expect(inchesFromTargetWidth(DEFAULT_POSITIONING.targetWidthM)).toBeCloseTo(
+      55,
+      9,
+    );
+  });
+
   it("gives the target width on a fullscreen 16:9 screen", () => {
     // A 65" TV is 1.439 m wide; the target spans about 65.5% of it.
     expect(targetWidthFromInches(65)).toBeCloseTo(0.943, 3);
@@ -39,6 +48,16 @@ describe("screen size in inches", () => {
       100,
       9,
     );
+  });
+
+  it("turns a diagonal into width and height", () => {
+    const tv = screenFromDiagonal(55 * 0.0254);
+    expect(tv.widthM / tv.heightM).toBeCloseTo(16 / 9, 9);
+    expect(targetWidthFromScreen(tv)).toBeCloseTo(targetWidthFromInches(55), 9);
+
+    const fourThree = screenFromDiagonal(2.5, 4 / 3);
+    expect(fourThree.widthM).toBeCloseTo(2, 9);
+    expect(fourThree.heightM).toBeCloseTo(1.5, 9);
   });
 });
 

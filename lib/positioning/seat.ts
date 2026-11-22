@@ -32,6 +32,15 @@ export function targetWidthFromScreen(screen: ScreenSize): number {
   return screen.widthM * targetShareOfScreen(screen.widthM / screen.heightM);
 }
 
+/** Screen width and height (metres) from a diagonal and aspect ratio. */
+export function screenFromDiagonal(
+  diagonalM: number,
+  aspect = 16 / 9,
+): ScreenSize {
+  const heightM = diagonalM / Math.hypot(aspect, 1);
+  return { widthM: heightM * aspect, heightM };
+}
+
 /** The screen size a config stands for: as entered, or 16:9 from the target. */
 export function screenFromConfig(config: PositioningConfig): ScreenSize {
   if (config.screen) return config.screen;
@@ -62,7 +71,7 @@ export function inchesFromTargetWidth(targetWidthM: number): number {
  * (`lib/crowd.ts`), not to the room.
  */
 export const DEFAULT_POSITIONING: PositioningConfig = {
-  targetWidthM: targetWidthFromInches(65),
+  targetWidthM: targetWidthFromInches(55),
   venueWidthM: 200,
   venueDepthM: 200,
 };

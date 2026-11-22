@@ -5,6 +5,7 @@ import type { HostClient } from "@/app/sessions/host-client";
 import { AUDIO_OFFSET_LIMIT_MS } from "@/lib/audio-schedule";
 import {
   screenFromConfig,
+  screenFromDiagonal,
   targetWidthFromScreen,
 } from "@/lib/positioning/seat";
 import type { SessionMessage } from "@/lib/protocol";
@@ -13,17 +14,13 @@ import type { HostAudioControls } from "./use-host-audio";
 import styles from "./room.module.css";
 
 type Unit = "in" | "cm";
+type ScreenMode = "diagonal" | "dimensions";
 const METRES_PER: Record<Unit, number> = { in: 0.0254, cm: 0.01 };
 const UNIT_KEY = "lightshow-screen-unit";
+const MODE_KEY = "lightshow-screen-mode";
 /** Smallest and largest screen side, in metres. */
 const MIN_SIDE_M = 0.1;
 const MAX_SIDE_M = 100;
-/** Common screen shapes, width over height. */
-const SHAPES: [string, number][] = [
-  ["16:9", 16 / 9],
-  ["16:10", 16 / 10],
-  ["4:3", 4 / 3],
-];
 
 /**
  * Room settings behind one button: the big screen's size (phones need it to
@@ -198,10 +195,44 @@ function useUnit(): [Unit, (unit: Unit) => void] {
   return [unit, writeUnit];
 }
 
+const modeListeners = new Set<() => void>();
+
+function readMode(): ScreenMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === "dimensions"
+      ? "dimensions"
+      : "diagonal";
+  } catch {
+    return "diagonal";
+  }
+}
+
+function writeMode(mode: ScreenMode): void {
+  try {
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    // Not remembered; diagonal next time.
+  }
+  for (const fn of modeListeners) fn();
+}
+
+/** Diagonal or width × height entry, remembered on this laptop. */
+function useScreenMode(): [ScreenMode, (mode: ScreenMode) => void] {
+  const mode = useSyncExternalStore(
+    (fn) => {
+      modeListeners.add(fn);
+      return () => modeListeners.delete(fn);
+    },
+    readMode,
+    () => "diagonal" as ScreenMode,
+  );
+  return [mode, writeMode];
+}
+
 /**
- * The big screen's width and height. Phones judge distance by how big the
- * target looks, and the target's real width depends on both: on a 4:3
- * projector it fills more of the width than on a 16:9 TV.
+ * The big screen's size, entered either as a diagonal (default 55" 16:9) or
+ * as width × height. Phones judge distance from how big the target looks on
+ * the screen.
  */
 function ScreenFields({
   config,
@@ -211,6 +242,7 @@ function ScreenFields({
   onChange: (screen: ScreenSize) => void;
 }) {
   const [unit, setUnit] = useUnit();
+  const [mode, setMode] = useScreenMode();
   const screen = screenFromConfig(config);
   const per = METRES_PER[unit];
   // Whole centimetres, or inches to a tenth.
@@ -227,6 +259,8 @@ function ScreenFields({
     }
     onChange(next);
   };
+  const diagonalM = Math.hypot(screen.widthM, screen.heightM);
+  const diagonalIn = diagonalM / 0.0254;
   const side = (key: keyof ScreenSize, label: string) => (
     <label className={styles.inputWithUnit}>
       <input
@@ -246,40 +280,62 @@ function ScreenFields({
           if (e.key === "Enter") e.currentTarget.blur();
         }}
       />
-      {label === "width" ? "×" : unit}
+      {label === "width" ? "×" : null}
     </label>
   );
-  const aspect = screen.widthM / screen.heightM;
-  const named = SHAPES.find(([, r]) => Math.abs(r - aspect) < 0.01)?.[0];
-  const diagonal = Math.hypot(screen.widthM, screen.heightM) / 0.0254;
 
   return (
     <>
       <div className={styles.setting}>
         <span>Screen</span>
-        <span className={styles.screenSides}>
-          {side("widthM", "width")}
-          {side("heightM", "height")}
-        </span>
-      </div>
-      <div className={styles.setting}>
-        <span className={styles.shapeButtons} role="group" aria-label="Shape">
-          {SHAPES.map(([name, ratio]) => (
+        <span
+          className={styles.shapeButtons}
+          role="group"
+          aria-label="Screen size mode"
+        >
+          {(
+            [
+              ["diagonal", "Diagonal"],
+              ["dimensions", "W × H"],
+            ] as const
+          ).map(([value, label]) => (
             <button
-              key={name}
+              key={value}
               type="button"
-              aria-pressed={name === named}
-              onClick={() =>
-                commit({
-                  widthM: screen.widthM,
-                  heightM: screen.widthM / ratio,
-                })
-              }
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
             >
-              {name}
+              {label}
             </button>
           ))}
         </span>
+      </div>
+      <div className={styles.setting}>
+        {mode === "diagonal" ? (
+          <label className={styles.inputWithUnit}>
+            <input
+              key={`${unit}-${diagonalM}`}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="any"
+              defaultValue={shown(diagonalM)}
+              aria-label={`Screen diagonal in ${unit === "in" ? "inches" : "centimetres"}`}
+              onBlur={(e) => {
+                const value = Number(e.target.value) * per;
+                if (Number.isFinite(value)) commit(screenFromDiagonal(value));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </label>
+        ) : (
+          <span className={styles.screenSides}>
+            {side("widthM", "width")}
+            {side("heightM", "height")}
+          </span>
+        )}
         <span className={styles.shapeButtons} role="group" aria-label="Units">
           {(["in", "cm"] as const).map((u) => (
             <button
@@ -294,9 +350,10 @@ function ScreenFields({
         </span>
       </div>
       <p className={styles.hint}>
-        The picture&rsquo;s width and height (about {Math.round(diagonal)}
-        &Prime; diagonal{named ? `, ${named}` : ""}). Phones use it to judge
-        distance.
+        {mode === "diagonal"
+          ? `${shown(screen.widthM)} × ${shown(screen.heightM)} ${unit} (16:9).`
+          : `About ${Math.round(diagonalIn)}″ diagonal.`}{" "}
+        Phones use it to judge distance.
       </p>
     </>
   );
