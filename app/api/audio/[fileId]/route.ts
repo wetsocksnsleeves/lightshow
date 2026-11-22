@@ -4,9 +4,12 @@ import {
   audioFilePath,
   contentTypeFor,
   isAudioFileId,
+  isBuiltinAudio,
   parseRange,
 } from "@/server/audio-store";
+import { isAudioOwnedBy } from "@/server/db";
 import { guardApiRequest } from "@/server/http";
+import { readOwnerId } from "@/server/owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,9 +17,9 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ fileId: string }> };
 
 /**
- * Serve an uploaded audio file. Supports single `Range` requests (206), which
- * `<audio>` elements need to seek. File ids are unique and files never change,
- * so responses are cacheable forever.
+ * Serve a built-in audio file (public) or an uploaded audio file owned by the
+ * caller's browser. Supports single `Range` requests (206), which `<audio>`
+ * elements need to seek.
  */
 export async function GET(
   request: Request,
@@ -26,6 +29,12 @@ export async function GET(
   if (refused) return refused;
   const { fileId } = await params;
   if (!isAudioFileId(fileId)) return notFound();
+
+  const builtin = isBuiltinAudio(fileId);
+  if (!builtin) {
+    const ownerId = readOwnerId(request);
+    if (!ownerId || !isAudioOwnedBy(fileId, ownerId)) return notFound();
+  }
 
   const file = audioFilePath(fileId);
   let size: number;
@@ -38,7 +47,7 @@ export async function GET(
   const headers = new Headers({
     "Content-Type": contentTypeFor(fileId),
     "Accept-Ranges": "bytes",
-    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cache-Control": `${builtin ? "public" : "private"}, max-age=31536000, immutable`,
   });
 
   const range = parseRange(request.headers.get("range"), size);

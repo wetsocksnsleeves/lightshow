@@ -31,9 +31,12 @@ export class TestClient {
     });
   }
 
-  static connect(url: string): Promise<TestClient> {
+  static connect(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<TestClient> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(url, headers ? { headers } : undefined);
       const client = new TestClient(ws);
       ws.once("open", () => resolve(client));
       ws.once("error", reject);

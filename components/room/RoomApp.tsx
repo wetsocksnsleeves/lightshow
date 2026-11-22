@@ -98,13 +98,15 @@ export function RoomApp() {
     setError(null);
     const deps = browserHostDeps();
     const stored = fresh ? null : readRoomCode();
+    // Ensure the browser has its owner cookie before opening `/ws`, so saved
+    // shows created in this session resolve on the same socket.
+    const shows = await listShows().catch(() => []);
     if (stored && readHostToken(deps.storage, stored)) {
       setCode(stored);
       return;
     }
     setCode(null);
     try {
-      const shows = await listShows().catch(() => []);
       const showId = shows[0]?.id ?? BUILTIN_SHOWS[0]!.show.id;
       const created = await createHostedSession(showId, deps);
       writeRoomCode(created);

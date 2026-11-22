@@ -74,6 +74,11 @@ const BUILTIN_AUDIO: Record<string, string> = {
   ...Object.fromEntries(BUILTIN_TRACKS.map((t) => [t.fileId, t.path])),
 };
 
+/** Whether `fileId` is one of the public built-in audio files shipped with the app. */
+export function isBuiltinAudio(fileId: string): boolean {
+  return Object.hasOwn(BUILTIN_AUDIO, fileId);
+}
+
 export function audioFilePath(fileId: string): string {
   if (!isAudioFileId(fileId))
     throw new Error(`invalid audio file id: ${fileId}`);

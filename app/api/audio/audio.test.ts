@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { MIXTAPE_AUDIO_FILE_ID } from "@/lib/mixtape-show";
 import type { Show } from "@/lib/types";
 import { MAX_AUDIO_BYTES } from "@/server/audio-store";
 import { createShow } from "@/server/db";
+import { mintOwnerToken, OWNER_COOKIE, ownerIdFromToken } from "@/server/owner";
 import { withTempDataDir } from "@/server/testing/temp-data-dir";
 import * as cover from "./[fileId]/cover/route";
 import * as item from "./[fileId]/route";
@@ -11,19 +13,34 @@ import * as upload from "./route";
 
 const dataDir = withTempDataDir();
 
-function uploadRequest(file: File | string | null): Request {
+const ALICE_TOKEN = mintOwnerToken();
+const ALICE_OWNER = ownerIdFromToken(ALICE_TOKEN);
+const ALICE_COOKIE = `${OWNER_COOKIE}=${ALICE_TOKEN}`;
+const BOB_TOKEN = mintOwnerToken();
+const BOB_OWNER = ownerIdFromToken(BOB_TOKEN);
+const BOB_COOKIE = `${OWNER_COOKIE}=${BOB_TOKEN}`;
+
+function uploadRequest(
+  file: File | string | null,
+  cookie: string | null = ALICE_COOKIE,
+): Request {
   const form = new FormData();
   if (file !== null) form.set("file", file);
   return new Request("http://localhost/api/audio", {
     method: "POST",
+    headers: cookie ? { cookie } : {},
     body: form,
   });
 }
 
-function getRequest(range?: string): Request {
-  return new Request("http://localhost/api/audio/x", {
-    headers: range ? { range } : {},
-  });
+function getRequest(
+  range?: string,
+  cookie: string | null = ALICE_COOKIE,
+): Request {
+  const headers: Record<string, string> = {};
+  if (range) headers.range = range;
+  if (cookie) headers.cookie = cookie;
+  return new Request("http://localhost/api/audio/x", { headers });
 }
 
 function ctx(fileId: string) {
@@ -63,24 +80,71 @@ describe("GET /api/audio", () => {
     const a = await uploadMp3();
     const b = await uploadMp3();
 
-    createShow({ audio: { fileId: a, durationMs: 1000, title: "Song A" } });
+    createShow(
+      { audio: { fileId: a, durationMs: 1000, title: "Song A" } },
+      ALICE_OWNER,
+    );
     await pause();
-    createShow({ audio: { fileId: taggedId, durationMs: 3000 } });
+    createShow({ audio: { fileId: taggedId, durationMs: 3000 } }, ALICE_OWNER);
     await pause();
-    createShow({ audio: { fileId: b, durationMs: 2000, artist: "B" } });
+    createShow(
+      { audio: { fileId: b, durationMs: 2000, artist: "B" } },
+      ALICE_OWNER,
+    );
     await pause();
-    createShow({ audio: { fileId: "", durationMs: 5000 } });
+    createShow({ audio: { fileId: "", durationMs: 5000 } }, ALICE_OWNER);
+    await pause();
+    // Another user's show must not appear in Alice's recent tracks.
+    const bobFile = await (
+      await upload.POST(
+        uploadRequest(
+          new File([bytes], "bob.mp3", { type: "audio/mpeg" }),
+          BOB_COOKIE,
+        ),
+      )
+    ).json();
+    createShow(
+      {
+        audio: {
+          fileId: (bobFile as { fileId: string }).fileId,
+          durationMs: 4000,
+          title: "Bob Secret",
+        },
+      },
+      BOB_OWNER,
+    );
     await pause();
     // A newer show reuses A without a title: the older title still shows.
-    createShow({ audio: { fileId: a, durationMs: 1000 } });
+    createShow({ audio: { fileId: a, durationMs: 1000 } }, ALICE_OWNER);
 
-    const res = await upload.GET(new Request("http://localhost/api/audio"));
+    const res = await upload.GET(
+      new Request("http://localhost/api/audio", {
+        headers: { cookie: ALICE_COOKIE },
+      }),
+    );
     expect(res.status).toBe(200);
     const { tracks } = (await res.json()) as { tracks: Show["audio"][] };
     expect(tracks).toEqual([
       { fileId: a, durationMs: 1000, title: "Song A" },
       { fileId: b, durationMs: 2000, artist: "B" },
       { fileId: taggedId, durationMs: 3000, title: "From Tags" },
+    ]);
+
+    // Bob sees only his own track, not Alice's.
+    const bobRes = await upload.GET(
+      new Request("http://localhost/api/audio", {
+        headers: { cookie: BOB_COOKIE },
+      }),
+    );
+    expect(bobRes.status).toBe(200);
+    expect(
+      ((await bobRes.json()) as { tracks: Show["audio"][] }).tracks,
+    ).toEqual([
+      {
+        fileId: (bobFile as { fileId: string }).fileId,
+        durationMs: 4000,
+        title: "Bob Secret",
+      },
     ]);
   });
 });
@@ -269,6 +333,38 @@ describe("/api/audio", () => {
       );
       expect(res.status, JSON.stringify(headers)).toBe(403);
     }
+  });
+
+  it("blocks other browsers from reading uploaded audio or cover art, while built-in tracks stay public", async () => {
+    const fileId = await uploadMp3();
+    // Bob and anonymous visitors get 404 for Alice's uploaded file.
+    expect(
+      (await item.GET(getRequest(undefined, BOB_COOKIE), ctx(fileId))).status,
+    ).toBe(404);
+    expect(
+      (await item.GET(getRequest(undefined, null), ctx(fileId))).status,
+    ).toBe(404);
+    expect(
+      (await cover.GET(getRequest(undefined, BOB_COOKIE), ctx(fileId))).status,
+    ).toBe(404);
+
+    // Alice's uploaded audio is cached privately, not publicly.
+    const aliceRes = await item.GET(
+      getRequest(undefined, ALICE_COOKIE),
+      ctx(fileId),
+    );
+    expect(aliceRes.status).toBe(200);
+    expect(aliceRes.headers.get("cache-control")).toContain("private");
+    await aliceRes.arrayBuffer();
+
+    // Built-in audio remains publicly accessible with no cookie.
+    const builtinRes = await item.GET(
+      getRequest("bytes=0-15", null),
+      ctx(MIXTAPE_AUDIO_FILE_ID),
+    );
+    expect(builtinRes.status).toBe(206);
+    expect(builtinRes.headers.get("cache-control")).toContain("public");
+    await builtinRes.arrayBuffer();
   });
 
   it("refuses unknown Host headers with 403", async () => {

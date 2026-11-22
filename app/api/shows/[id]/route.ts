@@ -1,5 +1,7 @@
-import { deleteShow, getShow, updateShow } from "@/server/db";
+import { isBuiltinAudio } from "@/server/audio-store";
+import { deleteShow, getAudioOwner, getShow, updateShow } from "@/server/db";
 import { errorResponse, guardApiRequest, readJson } from "@/server/http";
+import { readOwnerId } from "@/server/owner";
 import { parseShowPatch } from "@/server/show-validation";
 
 // better-sqlite3 is a native module, so this must run on Node.
@@ -19,13 +21,21 @@ export async function GET(
 ): Promise<Response> {
   const refused = guardApiRequest(request, { write: false });
   if (refused) return refused;
-  const show = getShow((await params).id);
-  return show ? Response.json({ show }) : notFound();
+  const ownerId = readOwnerId(request);
+  if (!ownerId) return notFound();
+  const show = getShow((await params).id, ownerId);
+  return show
+    ? Response.json(
+        { show },
+        { headers: { "Cache-Control": "private, no-store" } },
+      )
+    : notFound();
 }
 
 /**
- * Update a show. Any of `name`, `venue`, `audio`, `clips` may be sent; fields
- * left out keep their stored value. Replies `{ show }` with the saved show.
+ * Update a show owned by this browser. Any of `name`, `venue`, `audio`, `clips`
+ * may be sent; fields left out keep their stored value. Replies `{ show }` with
+ * the saved show.
  */
 export async function PUT(
   request: Request,
@@ -37,7 +47,16 @@ export async function PUT(
   if (!body.ok) return body.response;
   const patch = parseShowPatch(body.value);
   if (!patch.ok) return errorResponse(400, patch.error);
-  const show = updateShow((await params).id, patch.value);
+  const ownerId = readOwnerId(request);
+  if (!ownerId) return notFound();
+  const fileId = patch.value.audio?.fileId;
+  if (fileId && !isBuiltinAudio(fileId)) {
+    const fileOwner = getAudioOwner(fileId);
+    if (fileOwner && fileOwner !== ownerId) {
+      return errorResponse(403, "audio belongs to another user");
+    }
+  }
+  const show = updateShow((await params).id, patch.value, ownerId);
   return show ? Response.json({ show }) : notFound();
 }
 
@@ -50,7 +69,9 @@ export async function DELETE(
 ): Promise<Response> {
   const refused = guardApiRequest(request, { write: true });
   if (refused) return refused;
-  return deleteShow((await params).id)
+  const ownerId = readOwnerId(request);
+  if (!ownerId) return notFound();
+  return deleteShow((await params).id, ownerId)
     ? new Response(null, { status: 204 })
     : notFound();
 }

@@ -23,7 +23,7 @@ import { TEST_VENUE } from "@/lib/test-show";
 import type { Show, Venue } from "@/lib/types";
 import { audioExtFor, saveAudio } from "@/server/audio-store";
 import { audioDir } from "@/server/data-dir";
-import { createShow, getShow, updateShow } from "@/server/db";
+import { createShow, getShowById, updateShow } from "@/server/db";
 import { parseShowPatch } from "@/server/show-validation";
 
 const SAMPLE_RATE = 22_050;
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   }
   const file = positionals[0];
 
-  const existing = values.show ? getShow(values.show) : null;
+  const existing = values.show ? getShowById(values.show) : null;
   if (values.show && !existing)
     throw new Error(`no show with id ${values.show}`);
   const venue: Venue = existing?.venue.shapes.length

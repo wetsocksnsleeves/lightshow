@@ -1,24 +1,27 @@
 import { readAudioInfo } from "@/server/audio-info";
 import { audioExtFor, MAX_AUDIO_BYTES, saveAudio } from "@/server/audio-store";
-import { listRecentAudio } from "@/server/db";
+import { listRecentAudio, registerAudioFile } from "@/server/db";
 import {
   errorResponse,
   readBodyWithLimit,
   guardApiRequest,
 } from "@/server/http";
+import { ensureOwner, withOwnerCookie } from "@/server/owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * The music used by saved shows, newest first: `{ tracks: Show["audio"][] }`.
- * A track saved without a title or artist gets them from the file's tags.
+ * The music used by this browser's saved shows, newest first:
+ * `{ tracks: Show["audio"][] }`. A track saved without a title or artist gets
+ * them from the file's tags.
  */
 export async function GET(request: Request): Promise<Response> {
   const refused = guardApiRequest(request, { write: false });
   if (refused) return refused;
+  const { ownerId, setCookie } = ensureOwner(request);
   const tracks = await Promise.all(
-    listRecentAudio().map(async (track) => {
+    listRecentAudio(ownerId).map(async (track) => {
       if (track.title && track.artist) return track;
       const tags = await readAudioInfo(track.fileId);
       const title = track.title ?? tags.title;
@@ -30,7 +33,11 @@ export async function GET(request: Request): Promise<Response> {
       };
     }),
   );
-  return Response.json({ tracks });
+  const res = Response.json(
+    { tracks },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
+  return withOwnerCookie(res, setCookie);
 }
 
 /**
@@ -70,10 +77,12 @@ export async function POST(request: Request): Promise<Response> {
   if (!ext) {
     return errorResponse(415, "unsupported audio type; use mp3, wav or m4a");
   }
+  const { ownerId, setCookie } = ensureOwner(request);
   const fileId = await saveAudio(new Uint8Array(await file.arrayBuffer()), ext);
-  return Response.json(
-    { fileId, url: `/api/audio/${fileId}` },
-    { status: 201 },
+  registerAudioFile(fileId, ownerId);
+  return withOwnerCookie(
+    Response.json({ fileId, url: `/api/audio/${fileId}` }, { status: 201 }),
+    setCookie,
   );
 }
 
