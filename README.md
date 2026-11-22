@@ -1,28 +1,58 @@
-# lightshow
+# Lightshow
 
-An easy to use, minimal-setup, synchronised crowd light show platform. Participants only need their phone.
+Turn an audience's phones into a synchronised crowd light show. No app install or hardware wristbands required.
 
-A host masks out the shape of the venue, imports an audio track, and paints colour onto a timeline. At the show, each participant's phone finds its own seat with its camera, synchronised with the server, and materialises those colors through light.
+A host draws the venue, drops in an audio track and paints light effects onto a timeline, or generates a full show from the music. At the event, participants scan a QR code on the big screen, point their phone camera at the screen to locate their seat, and play back their pre-computed light schedule in sync over WebSockets.
+
+[Visit lightshow.party](https://lightshow.party)
+
+[![Lightshow host room showing the effects library, 120 ready seats and a multi-track timeline](docs/media/editor.png)](docs/media/editor.png)
+
+Built for the **2026 Tanda Hackathon**.
+
+| Team                                                             | Contribution                                                                |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Etao · [@wetsocksnsleeves](https://github.com/wetsocksnsleeves)  | Sync engine, schedule compiler, audio-reactive generator and built-in shows |
+| William · [@williamjaackson](https://github.com/williamjaackson) | Camera seat positioning, rooms editor and crowd recording                   |
+| Chloe · [@clobothehobo](https://github.com/clobothehobo)         | Host room design, branding and built-in tracks                              |
+| Lliam · [@lliamsymonds04](https://github.com/lliamsymonds04)     | 3D crowd viewer and Fly.io deployment                                       |
+| Farzad · [@FarzadHayat](https://github.com/FarzadHayat)          | Pitch deck stage lighting and demo show                                     |
+
+## How it works
+
+1. **Design the show** in the host room — layer flashes, waves, splits, chases and custom shapes over an audio waveform, or auto-generate a show from three-band frequency analysis.
+2. **Project the big screen** (`/sessions/<code>/screen`) with its corner positioning anchors, LED grille and join QR code.
+3. **Locate seats with the camera** — each phone scans the QR code, points at the big screen to solve its position in the room, syncs its clock to the server, and receives its own light schedule.
+4. **Preview and run live** — simulate a crowd in 3D at `/mock` before showtime, then start playback in sync with the venue's audio.
+
+[![Big screen positioning target with corner anchors, LED grille and join QR code](docs/media/big-screen.png)](docs/media/big-screen.png)
 
 ## Demo
 
-**Editor** — effects library, venue preview and a multi-track clip timeline. Or an auto generated show via deterministic algorithms, deconstructing 3 tiers of frequency and applies preset based on what fits the given region.
+| Editor and multi-track timeline                                        | Simulated phones joining a room                                                                     |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| [![Editor view](docs/demo/editor-view.gif)](docs/demo/editor-view.gif) | [![Simulated phones joining a session](docs/demo/mock-demo-join.gif)](docs/demo/mock-demo-join.gif) |
 
-![Editor view](docs/demo/editor-view.gif)
+| Live playback from the host room                                                                      | Bird's-eye 3D crowd view                                                                        |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| [![Editor preview playing back live](docs/demo/live-show-editor.gif)](docs/demo/live-show-editor.gif) | [![3D venue view during live playback](docs/demo/mock-3d-live.gif)](docs/demo/mock-3d-live.gif) |
 
-**Test harness** — simulate N phones joining a session before any real participant connects. Stress test infrastructure, connectivity, and preview your show.
+## Run locally
 
-![Simulated phones joining a session](docs/demo/mock-demo-join.gif)
+Built with Next.js, TypeScript, Node.js (`ws`) and SQLite. Requires Node.js 24+.
 
-**Playback, from the booth** — the editor's own preview pane running the live show in real time.
+```sh
+git clone https://github.com/wetsocksnsleeves/lightshow.git
+cd lightshow
+npm ci
+npm run dev
+```
 
-![Editor preview playing back live](docs/demo/live-show-editor.gif)
+Open [localhost:3000](http://localhost:3000) to open a host room, then open [localhost:3000/mock](http://localhost:3000/mock) in another tab to simulate phones joining in 3D.
 
-**Playback, a bird's eye view** — the venue's 3D view with every simulated seat lit and changing colour in sync.
+To test with real phones over HTTPS (required for camera access and screen wake lock), copy `.env.example` to `.env` and set `PUBLIC_URL` to your tunnel or public HTTPS address.
 
-![3D venue view during live playback](docs/demo/mock-3d-live.gif)
-
-On the night, a real audience scans a join code, points their phone's camera at the big screen to find their seat through an ingenious algorithm, and taps ready. Larger venues can be supported through more involved algorithms, triangulating position through readily available signals.
+[Spec](SPEC.md) · [Development plan](DEVELOPMENT.md) · [Device testing](docs/device-test.md)
 
 ## License
 
