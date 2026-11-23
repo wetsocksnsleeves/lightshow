@@ -72,6 +72,15 @@ To test with real phones over HTTPS (required for camera access and screen wake 
 
 [Spec](SPEC.md) · [Development plan](DEVELOPMENT.md) · [Device testing](docs/device-test.md)
 
+## Docker image
+
+Every push to `main` that passes CI publishes `ghcr.io/wetsocksnsleeves/lightshow`, tagged `main` and `sha-<commit>`. It listens on port 8080 and keeps its database and uploaded audio in `/data`:
+
+```sh
+docker run -p 8080:8080 -v lightshow-data:/data \
+  -e PUBLIC_URL=https://your-public-address ghcr.io/wetsocksnsleeves/lightshow:main
+```
+
 ## License
 
 [O'Saasy License](LICENSE.md)

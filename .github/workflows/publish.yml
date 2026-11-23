@@ -1,0 +1,66 @@
+name: Publish image
+
+# After CI passes on main, build the Docker image and publish it to
+# ghcr.io/wetsocksnsleeves/lightshow as :main and :sha-<commit>.
+# Pull requests that change the image only build it, as a check.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/publish.yml
+  workflow_dispatch:
+
+# A newer main build replaces an older one still running, so :main never
+# ends up pointing at an older commit.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Publish the exact commit CI tested.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Build
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          image="ghcr.io/${REPO,,}"
+          sha="$(git rev-parse HEAD)"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "TAG=sha-${sha:0:12}" >> "$GITHUB_ENV"
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/$REPO" \
+            --label "org.opencontainers.image.revision=$sha" \
+            --tag "$image:main" --tag "$image:sha-${sha:0:12}" .
+
+      - name: Push
+        # Only main is published; pull requests and other branches just build.
+        if: >-
+          github.event_name == 'workflow_run' ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+          docker push "$IMAGE:$TAG"
+          docker push "$IMAGE:main"
